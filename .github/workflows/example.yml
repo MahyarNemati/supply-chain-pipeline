@@ -1,0 +1,64 @@
+name: example
+
+on:
+  push:
+    branches: [main]
+    tags: ["example/v*"]
+    paths:
+      - "example/**"
+      - ".github/workflows/example.yml"
+      - ".github/workflows/supply-chain.yml"
+      - ".github/actions/**"
+  pull_request:
+    paths:
+      - "example/**"
+      - ".github/workflows/example.yml"
+      - ".github/workflows/supply-chain.yml"
+      - ".github/actions/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Go test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: example
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: example/go.mod
+          cache-dependency-path: example/go.mod
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  image:
+    name: Supply chain
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    uses: ./.github/workflows/supply-chain.yml
+    with:
+      image-name: ghcr.io/${{ github.repository_owner }}/digest-service
+      context: example
+      dockerfile: example/Dockerfile
+      push: ${{ github.event_name != 'pull_request' }}
+      severity-cutoff: high
+      build-args: |
+        VERSION=${{ github.ref_name }}
+        COMMIT=${{ github.sha }}
