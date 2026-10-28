@@ -1,0 +1,9 @@
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+sbom*.json
+*.sarif
+.pipeline/
+.env
