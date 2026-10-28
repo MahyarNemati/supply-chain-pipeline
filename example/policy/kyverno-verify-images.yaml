@@ -1,0 +1,60 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-signed-images
+  annotations:
+    policies.kyverno.io/title: Require images signed by the supply-chain workflow
+    policies.kyverno.io/category: Software Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Admits images from the owner's GHCR namespace only when they carry a
+      keyless cosign signature from the supply-chain reusable workflow, an
+      SPDX SBOM attestation and a SLSA v1 provenance attestation produced by
+      the same workflow. Image references are rewritten to their digest.
+spec:
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature-and-attestations
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kyverno]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/mahyarnemati/*"
+          failureAction: Enforce
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+          attestors: &workflow-identity
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    # yamllint disable-line rule:line-length
+                    subjectRegExp: '^https://github\.com/MahyarNemati/supply-chain-pipeline/\.github/workflows/supply-chain\.yml@refs/(heads/main|tags/v[0-9]+\.[0-9]+\.[0-9]+)$'
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          attestations:
+            - type: https://spdx.dev/Document
+              attestors: *workflow-identity
+              conditions:
+                - all:
+                    - key: "{{ spdxVersion }}"
+                      operator: Equals
+                      value: SPDX-2.3
+            - type: https://slsa.dev/provenance/v1
+              attestors: *workflow-identity
+              conditions:
+                - all:
+                    - key: "{{ buildDefinition.buildType }}"
+                      operator: Equals
+                      value: https://github.com/MahyarNemati/supply-chain-pipeline/buildtypes/container/v1
+                    - key: "{{ buildDefinition.internalParameters.github.runner_environment }}"
+                      operator: Equals
+                      value: github-hosted
