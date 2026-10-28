@@ -1,0 +1,88 @@
+name: Sign and attest container image
+description: >
+  Keyless cosign signature plus SPDX, CycloneDX and SLSA v1 provenance
+  attestations for an image that is already in the registry.
+
+inputs:
+  image:
+    description: Image repository without tag or digest, e.g. ghcr.io/owner/app
+    required: true
+  digest:
+    description: Image manifest digest (sha256:...)
+    required: true
+  spdx-path:
+    description: Path to the SPDX JSON SBOM
+    required: true
+  cyclonedx-path:
+    description: Path to the CycloneDX JSON SBOM
+    required: true
+  builder-id:
+    description: SLSA builder id, normally the reusable workflow ref
+    required: true
+  build-started-on:
+    description: RFC 3339 timestamp of when the build started
+    required: true
+  context:
+    description: Docker build context used for the build
+    required: true
+  dockerfile:
+    description: Dockerfile path used for the build
+    required: true
+  platforms:
+    description: Comma separated platform list
+    required: true
+  build-args:
+    description: Newline separated build args, recorded in provenance
+    required: false
+    default: ""
+
+outputs:
+  provenance-path:
+    description: Path to the generated provenance predicate
+    value: ${{ steps.provenance.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        DIGEST: ${{ inputs.digest }}
+      run: |
+        [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "::error::invalid digest: $DIGEST"; exit 1; }
+        [[ "$IMAGE" != *@* && "${IMAGE##*/}" != *:* ]] || { echo "::error::image must not include a tag or digest: $IMAGE"; exit 1; }
+        command -v cosign >/dev/null || { echo "::error::cosign is not installed; run sigstore/cosign-installer first"; exit 1; }
+
+    - name: Generate SLSA provenance predicate
+      id: provenance
+      shell: bash
+      env:
+        PROV_BUILDER_ID: ${{ inputs.builder-id }}
+        PROV_STARTED_ON: ${{ inputs.build-started-on }}
+        PROV_CONTEXT: ${{ inputs.context }}
+        PROV_DOCKERFILE: ${{ inputs.dockerfile }}
+        PROV_PLATFORMS: ${{ inputs.platforms }}
+        PROV_BUILD_ARGS: ${{ inputs.build-args }}
+      run: |
+        out="${RUNNER_TEMP}/provenance.json"
+        "${GITHUB_ACTION_PATH}/provenance.sh" > "$out"
+        echo "path=$out" >> "$GITHUB_OUTPUT"
+
+    - name: Sign image
+      shell: bash
+      env:
+        REF: ${{ inputs.image }}@${{ inputs.digest }}
+      run: cosign sign --yes "$REF"
+
+    - name: Attest SBOMs and provenance
+      shell: bash
+      env:
+        REF: ${{ inputs.image }}@${{ inputs.digest }}
+        SPDX: ${{ inputs.spdx-path }}
+        CYCLONEDX: ${{ inputs.cyclonedx-path }}
+        PROVENANCE: ${{ steps.provenance.outputs.path }}
+      run: |
+        cosign attest --yes --type spdxjson --predicate "$SPDX" "$REF"
+        cosign attest --yes --type cyclonedx --predicate "$CYCLONEDX" "$REF"
+        cosign attest --yes --type slsaprovenance1 --predicate "$PROVENANCE" "$REF"
