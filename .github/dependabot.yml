@@ -1,0 +1,18 @@
+version: 2
+
+# Without this, nothing keeps the dependencies current and the advisory badge
+# on the repository page accumulates quietly -- which is what happened here
+# before it was added. The patch bumps are grouped into one pull request so
+# the noise stays low and the interesting ones still arrive on their own.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  # The only image here is the demo app this action builds to exercise
+  # itself, which lives in example/.
+  - package-ecosystem: docker
+    directory: /example
+    schedule:
+      interval: monthly
