@@ -7,3 +7,6 @@ sbom*.json
 *.sarif
 .pipeline/
 .env
+
+# macOS Finder artefact.
+.DS_Store
